@@ -252,8 +252,12 @@ ghcr.io/su-kaka/gcli2api:latest
 
 ### 🤖 基本モデル
 - `gemini-2.5-pro`
-- `gemini-3-pro-preview`
+- `gemini-2.5-flash`
+- `gemini-3-flash-preview`
 - `gemini-3.1-pro-preview`
+- `gemini-3.1-flash-lite`
+- `gemini-3.5-flash`
+- `gemini-3.6-flash`
 
 ### 🧠 Thinkingモデル
 - `gemini-2.5-pro-high`: Thinkingモード
@@ -881,3 +885,4 @@ QQグループへの参加をお待ちしています！
 - ベンチャーキャピタルの出資を受けた企業または上場企業
 - 有料サービスまたは製品の提供
 - 商業的な競合利用
+
