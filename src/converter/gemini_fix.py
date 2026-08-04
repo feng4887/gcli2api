@@ -491,7 +491,183 @@ def prepare_image_generation_request(
 
     Args:
         request_body: 原始请求体
-        model…1643 tokens truncated…ash_lite_preview", "tab_jump_flash_lite_preview", "gpt-oss-120b-medium",
+        model: 模型名称
+
+    Returns:
+        处理后的请求体
+    """
+    request_body = request_body.copy()
+    model_lower = model.lower()
+
+    # 优先使用 size 参数
+    size_str = request_body.pop("size", None)
+    if size_str:
+        image_config = _parse_size_to_image_config(size_str)
+        log.debug(f"[IMAGE] 从 size 参数 '{size_str}' 解析: {image_config}")
+    else:
+        # 从模型名后缀解析
+        image_size = "4K" if "-4k" in model_lower else "2K" if "-2k" in model_lower else None
+
+        aspect_ratio = None
+        for suffix, ratio in [
+            ("-21x9", "21:9"), ("-16x9", "16:9"), ("-9x16", "9:16"),
+            ("-4x3", "4:3"), ("-3x4", "3:4"), ("-1x1", "1:1")
+        ]:
+            if suffix in model_lower:
+                aspect_ratio = ratio
+                break
+
+        image_config = {}
+        if aspect_ratio:
+            image_config["aspectRatio"] = aspect_ratio
+        if image_size:
+            image_config["imageSize"] = image_size
+
+    request_body["model"] = "gemini-3.1-flash-image"  # 统一使用基础模型名
+    request_body["generationConfig"] = {
+        "candidateCount": 1,
+        "imageConfig": image_config
+    }
+
+    # 移除不需要的字段
+    for key in ("systemInstruction", "tools", "toolConfig"):
+        request_body.pop(key, None)
+
+    return request_body
+
+
+# ==================== 模型特性辅助函数 ====================
+
+def get_base_model_name(model_name: str) -> str:
+    """移除模型名称中的后缀,返回基础模型名"""
+    # 按照从长到短的顺序排列，避免短后缀先于长后缀被匹配
+    suffixes = [
+        "-maxthinking", "-nothinking",  # 兼容旧模式
+        "-minimal", "-medium", "-search", "-think",  # 中等长度后缀
+        "-high", "-max", "-low"  # 短后缀
+    ]
+    result = model_name
+    changed = True
+    # 持续循环直到没有任何后缀可以移除
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if result.endswith(suffix):
+                result = result[:-len(suffix)]
+                changed = True
+                # 不使用 break，继续检查是否还有其他后缀
+    return result
+
+
+def _is_gemini_3_6_flash(model_name: str) -> bool:
+    """Return whether model-specific Gemini 3.6 Flash compatibility rules apply."""
+    return get_base_model_name(model_name.lower()) == "gemini-3.6-flash"
+
+
+def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]]:
+    """
+    根据模型名称获取思考配置
+
+    支持两种模式:
+    1. CLI 模式思考预算 (Gemini 2.5 系列): -max, -high, -medium, -low, -minimal
+    2. CLI 模式思考等级 (Gemini 3 Preview 系列): -high, -medium, -low, -minimal (仅 3-flash)
+    3. 兼容旧模式: -maxthinking, -nothinking (不返回给用户)
+
+    Returns:
+        (thinking_budget, thinking_level): 思考预算和思考等级
+    """
+    base_model = get_base_model_name(model_name)
+
+    # ========== 兼容旧模式 (不返回给用户) ==========
+    if "-nothinking" in model_name:
+        # nothinking 模式: 限制思考
+        if "flash" in base_model:
+            return 0, None
+        return 128, None
+    elif "-maxthinking" in model_name:
+        # maxthinking 模式: 最大思考预算
+        budget = 24576 if "flash" in base_model else 32768
+        if "gemini-3" in base_model:
+            # Gemini 3 系列不支持 thinkingBudget，返回 HIGH 等级
+            return None, "HIGH"
+        else:
+            return budget, None
+
+    # ========== 新 CLI 模式: 基于思考预算/等级 ==========
+
+    # Gemini 3 models use thinkingLevel.
+    if "gemini-3" in base_model:
+        if "-high" in model_name:
+            return None, "HIGH"
+        elif "-medium" in model_name:
+            # Flash models and Gemini 3.1 Pro support medium.
+            if "flash" in base_model or base_model == "gemini-3.1-pro-preview":
+                return None, "MEDIUM"
+            # Other Pro preview models do not support medium.
+            return None, None
+        elif "-low" in model_name:
+            return None, "LOW"
+        elif "-minimal" in model_name:
+            if "flash" in base_model:
+                return None, "MINIMAL"
+            return None, None
+        else:
+            # Default: 不设置 thinking 配置
+            return None, None
+
+    # Gemini 2.5 系列: 使用 thinkingBudget
+    elif "gemini-2.5" in base_model:
+        if "-max" in model_name:
+            # 2.5-flash-max: 24576, 2.5-pro-max: 32768
+            budget = 24576 if "flash" in base_model else 32768
+            return budget, None
+        elif "-high" in model_name:
+            # 2.5-flash-high: 16000, 2.5-pro-high: 16000
+            return 16000, None
+        elif "-medium" in model_name:
+            # 2.5-flash-medium: 8192, 2.5-pro-medium: 8192
+            return 8192, None
+        elif "-low" in model_name:
+            # 2.5-flash-low: 1024, 2.5-pro-low: 1024
+            return 1024, None
+        elif "-minimal" in model_name:
+            # 2.5-flash-minimal: 0, 2.5-pro-minimal: 128
+            budget = 0 if "flash" in base_model else 128
+            return budget, None
+        else:
+            # Default: 不设置 thinking budget
+            return None, None
+
+    # 其他模型: 不设置 thinking 配置
+    return None, None
+
+
+def is_search_model(model_name: str) -> bool:
+    """检查是否为搜索模型"""
+    return "-search" in model_name
+
+
+# ==================== 统一的 Gemini 请求后处理 ====================
+
+def is_thinking_model(model_name: str) -> bool:
+    """检查是否为思考模型 (包含 -thinking 或 pro)"""
+    return "think" in model_name or "pro" in model_name.lower()
+
+
+def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str], thinking_budget: Optional[int]) -> str:
+    """
+    将客户端请求的 Gemini 模型和思考参数，映射到 Antigravity 后端支持的精确模型 ID。
+    """
+    model_lower = model_name.lower()
+    
+    # 1. 后端支持的精确模型 ID 列表
+    exact_models = {
+        "gemini-3-flash", "gemini-3-flash-agent",
+        "gemini-3.1-pro-low", "gemini-pro-agent",
+        "gemini-3.1-flash-lite", "gemini-3.1-flash-image",
+        "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low",
+        "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-thinking",
+        "tab_flash_lite_preview", "tab_jump_flash_lite_preview", "gpt-oss-120b-medium",
         "chat_20706", "chat_23310"
     }
     
@@ -889,4 +1065,3 @@ async def normalize_gemini_request(
         result["generationConfig"] = generation_config
 
     return result
-
