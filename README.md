@@ -2,6 +2,8 @@
 
 **将 GeminiCLI 和 Antigravity 转换为 OpenAI 、GEMINI 和 Claude API 兼容接口**
 
+support latest **gemini-3.6-flash-high**
+
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: CNC-1.0](https://img.shields.io/badge/License-CNC--1.0-red.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/su-kaka/gcli2api/pkgs/container/gcli2api)
