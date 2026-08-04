@@ -252,8 +252,14 @@ All models have 1M context window capacity. Each credential file provides 1000 r
 
 ### 🤖 Base Models
 - `gemini-2.5-pro`
-- `gemini-3-pro-preview`
-- `gemini-3.1-pro-preview`
+- `gemini-2.5-flash`
+- `gemini-3-flash-preview`
+- `gemini-3.1-pro-preview` (preview; supports `low`, `medium`, and `high` thinking levels)
+- `gemini-3.1-flash-lite`
+- `gemini-3.5-flash`
+- `gemini-3.6-flash` (stable; supports `minimal`, `low`, `medium`, and `high` thinking levels)
+
+> `/v1/models` exposes the gateway model identifiers. Actual availability still depends on the authenticated Google project, region, and quota; verify it with a minimal `generateContent` request after OAuth authentication.
 
 ### 🧠 Thinking Models
 - `gemini-2.5-pro-high`: Thinking mode
@@ -881,3 +887,4 @@ This is a strict anti-commercial open source license. Please refer to the [LICEN
 - Venture capital-backed or publicly traded companies
 - Providing paid services or products
 - Commercial competitive use
+
