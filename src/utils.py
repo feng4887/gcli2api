@@ -63,6 +63,7 @@ BASE_MODELS = [
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
+    "gemini-3.6-flash",
 ]
 
 
@@ -118,10 +119,13 @@ def get_available_models(router_type: str = "openai") -> List[str]:
         # Gemini 3 系列: 使用思考等级后缀
         elif "gemini-3" in base_model:
             if "flash" in base_model:
-                # 3-flash-preview: 支持 high/medium/low/minimal
+                # Gemini 3 Flash models: support high/medium/low/minimal.
                 thinking_suffixes = ["-high", "-medium", "-low", "-minimal"]
+            elif base_model == "gemini-3.1-pro-preview":
+                # Gemini 3.1 Pro supports high/medium/low thinking levels.
+                thinking_suffixes = ["-high", "-medium", "-low"]
             elif "pro" in base_model:
-                # 3-pro-preview: 支持 high/low
+                # Older Gemini 3 Pro preview models support high/low.
                 thinking_suffixes = ["-high", "-low"]
 
         search_suffix = "-search"
@@ -287,3 +291,4 @@ async def verify_panel_token(credentials: HTTPAuthorizationCredentials = Depends
     if credentials.credentials != password:
         raise HTTPException(status_code=401, detail="密码错误")
     return credentials.credentials
+
