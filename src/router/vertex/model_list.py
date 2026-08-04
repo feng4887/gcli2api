@@ -25,6 +25,7 @@ VERTEX_MODELS = [
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash",
+    "gemini-3.6-flash",
 ]
 
 # 本地模块 - 基础路由工具
@@ -57,3 +58,4 @@ async def list_openai_models(token: str = Depends(authenticate_flexible)):
         "object": "list",
         "data": [model_to_dict(model) for model in model_list.data]
     })
+
