@@ -252,8 +252,14 @@ ghcr.io/su-kaka/gcli2api:latest
 
 ### 🤖 基础模型
 - `gemini-2.5-pro`
-- `gemini-3-pro-preview`
-- `gemini-3.1-pro-preview`
+- `gemini-2.5-flash`
+- `gemini-3-flash-preview`
+- `gemini-3.1-pro-preview`（预览版，支持 `low`、`medium`、`high` 推理等级）
+- `gemini-3.1-flash-lite`
+- `gemini-3.5-flash`
+- `gemini-3.6-flash`（稳定版，支持 `minimal`、`low`、`medium`、`high` 推理等级）
+
+> `/v1/models` 会展示网关已接入的模型名；实际可调用性仍取决于 OAuth 凭证对应的 Google 项目、区域和配额。完成认证后，请用一个最小 `generateContent` 请求进行验证。
 
 ### 🧠 思维模型（Thinking Models）
 - `gemini-2.5-pro-high`：思考模式
@@ -881,3 +887,4 @@ export COMPATIBILITY_MODE=true
 - 风投支持或公开交易的公司使用  
 - 提供付费服务或产品
 - 商业竞争用途
+
