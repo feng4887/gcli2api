@@ -543,7 +543,7 @@ def get_base_model_name(model_name: str) -> str:
     # 按照从长到短的顺序排列，避免短后缀先于长后缀被匹配
     suffixes = [
         "-maxthinking", "-nothinking",  # 兼容旧模式
-        "-minimal", "-medium", "-search", "-think",  # 中等长度后缀
+        "-minimal", "-medium", "-tiered", "-search", "-think",  # 中等长度后缀
         "-high", "-max", "-low"  # 短后缀
     ]
     result = model_name
@@ -559,9 +559,40 @@ def get_base_model_name(model_name: str) -> str:
     return result
 
 
-def _is_gemini_3_6_flash(model_name: str) -> bool:
-    """Return whether model-specific Gemini 3.6 Flash compatibility rules apply."""
-    return get_base_model_name(model_name.lower()) == "gemini-3.6-flash"
+_STRICT_GEMINI_FLASH_MODELS = frozenset({"gemini-3.6-flash", "gemini-3.7-flash"})
+_ANTIGRAVITY_EXACT_MODEL_IDS = frozenset({
+    "gemini-3-flash",
+    "gemini-3-flash-agent",
+    "gemini-3.1-pro-low",
+    "gemini-pro-agent",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-image",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-low",
+    "gemini-3.5-flash-extra-low",
+    "gemini-3.6-flash-high",
+    "gemini-3.6-flash-medium",
+    "gemini-3.6-flash-low",
+    "gemini-3.6-flash-tiered",
+    "gemini-3.7-flash-high",
+    "gemini-3.7-flash-medium",
+    "gemini-3.7-flash-low",
+    "gemini-3.7-flash-tiered",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash-thinking",
+    "tab_flash_lite_preview",
+    "tab_jump_flash_lite_preview",
+    "gpt-oss-120b-medium",
+    "chat_20706",
+    "chat_23310",
+})
+
+
+def _uses_strict_gemini_flash_request_rules(model_name: str) -> bool:
+    """Return whether the model rejects legacy sampling fields and prefilled turns."""
+    return get_base_model_name(model_name.lower()) in _STRICT_GEMINI_FLASH_MODELS
 
 
 def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]]:
@@ -570,7 +601,7 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
 
     支持两种模式:
     1. CLI 模式思考预算 (Gemini 2.5 系列): -max, -high, -medium, -low, -minimal
-    2. CLI 模式思考等级 (Gemini 3 Preview 系列): -high, -medium, -low, -minimal (仅 3-flash)
+    2. CLI 模式思考等级 (Gemini 3 系列): -high, -medium, -low；旧版 Flash 还支持 -minimal
     3. 兼容旧模式: -maxthinking, -nothinking (不返回给用户)
 
     Returns:
@@ -609,6 +640,9 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
             return None, "LOW"
         elif "-minimal" in model_name:
             if "flash" in base_model:
+                # Gemini 3.7 Flash exposes low as its smallest supported thinking level.
+                if base_model == "gemini-3.7-flash":
+                    return None, "LOW"
                 return None, "MINIMAL"
             return None, None
         else:
@@ -642,6 +676,42 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
     return None, None
 
 
+def _legacy_budget_to_thinking_level(model_name: str, thinking_budget: Any) -> str:
+    """Map a legacy numeric budget to the closest supported Gemini thinking level."""
+    try:
+        budget = int(thinking_budget)
+    except (TypeError, ValueError):
+        return "MEDIUM"
+
+    base_model = get_base_model_name(model_name.lower())
+    if budget <= 0:
+        return "MINIMAL" if base_model == "gemini-3.6-flash" else "LOW"
+    if budget <= 1024:
+        return "LOW"
+    if budget <= 8192:
+        return "MEDIUM"
+    return "HIGH"
+
+
+def _resolve_thinking_settings(
+    model_name: str,
+    generation_config: Dict[str, Any],
+) -> tuple[Optional[int], Optional[str]]:
+    """Resolve suffix and request settings, migrating budgets for strict Flash models."""
+    thinking_budget, thinking_level = get_thinking_settings(model_name)
+    if thinking_budget is None and thinking_level is None:
+        thinking_config = generation_config.get("thinkingConfig")
+        if isinstance(thinking_config, dict):
+            thinking_budget = thinking_config.get("thinkingBudget")
+            thinking_level = thinking_config.get("thinkingLevel")
+
+    if _uses_strict_gemini_flash_request_rules(model_name) and thinking_budget is not None:
+        thinking_level = _legacy_budget_to_thinking_level(model_name, thinking_budget)
+        thinking_budget = None
+
+    return thinking_budget, thinking_level
+
+
 def is_search_model(model_name: str) -> bool:
     """检查是否为搜索模型"""
     return "-search" in model_name
@@ -660,24 +730,35 @@ def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str],
     """
     model_lower = model_name.lower()
     
-    # 1. 后端支持的精确模型 ID 列表
-    exact_models = {
-        "gemini-3-flash", "gemini-3-flash-agent",
-        "gemini-3.1-pro-low", "gemini-pro-agent",
-        "gemini-3.1-flash-lite", "gemini-3.1-flash-image",
-        "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low",
-        "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-thinking",
-        "tab_flash_lite_preview", "tab_jump_flash_lite_preview", "gpt-oss-120b-medium",
-        "chat_20706", "chat_23310"
-    }
-    
+    # 1. Return model IDs already accepted by the Antigravity transport.
+    if model_lower in _ANTIGRAVITY_EXACT_MODEL_IDS:
+        return model_lower
+
     base_model = get_base_model_name(model_lower)
-    
-    # 已经是一个精确的后端模型 ID 则直接返回
-    if base_model in exact_models:
-        return base_model
-        
+
     # 2. 根据请求的模型名后缀直接映射
+    if base_model in _STRICT_GEMINI_FLASH_MODELS:
+        # These are Antigravity transport IDs, not public Gemini API model IDs.
+        if "-tiered" in model_lower:
+            return f"{base_model}-tiered"
+        if "-high" in model_lower:
+            return f"{base_model}-high"
+        if "-medium" in model_lower:
+            return f"{base_model}-medium"
+        if "-low" in model_lower or "-minimal" in model_lower:
+            return f"{base_model}-low"
+
+        normalized_level = (thinking_level or "").upper()
+        if normalized_level == "HIGH":
+            return f"{base_model}-high"
+        if normalized_level == "MEDIUM":
+            return f"{base_model}-medium"
+        if normalized_level in {"MINIMAL", "EXTRA-LOW", "LOW"}:
+            return f"{base_model}-low"
+
+        # The public bare model defaults to medium; mirror that for Antigravity.
+        return f"{base_model}-medium"
+
     if "gemini-3.1-pro" in base_model:
         if "-high" in model_lower:
             # gemini-3.1-pro-high is deprecated on the backend, mapped to gemini-pro-agent
@@ -751,13 +832,7 @@ async def normalize_gemini_request(
     # ========== 模式特定处理 ==========
     if mode == "geminicli":
         # 1. 思考设置
-        # 优先使用 get_thinking_settings 获取的思考预算和等级
-        thinking_budget, thinking_level = get_thinking_settings(model)
-
-        # 其次使用传入的思考预算（如果未从模型名称获取）
-        if thinking_budget is None and thinking_level is None:
-            thinking_budget = generation_config.get("thinkingConfig", {}).get("thinkingBudget")
-            thinking_level = generation_config.get("thinkingConfig", {}).get("thinkingLevel")
+        thinking_budget, thinking_level = _resolve_thinking_settings(model, generation_config)
 
         # 假如 is_thinking_model 为真或者思考预算/等级不为空，设置 thinkingConfig
         if is_thinking_model(model) or thinking_budget is not None or thinking_level is not None:
@@ -830,12 +905,7 @@ async def normalize_gemini_request(
             return prepare_image_generation_request(result, model)
         else:
             # 3. 思考模型处理
-            thinking_budget, thinking_level = get_thinking_settings(model)
-
-            # 其次使用传入的思考预算/等级
-            if thinking_budget is None and thinking_level is None:
-                thinking_budget = generation_config.get("thinkingConfig", {}).get("thinkingBudget")
-                thinking_level = generation_config.get("thinkingConfig", {}).get("thinkingLevel")
+            thinking_budget, thinking_level = _resolve_thinking_settings(model, generation_config)
 
             # 针对 Gemini 模型：根据思考设置映射至真实的 Antigravity 后端模型 ID
             if "gemini" in model.lower():
@@ -976,8 +1046,8 @@ async def normalize_gemini_request(
     if generation_config:
         # 强制设置 maxOutputTokens 为 64000
         generation_config["maxOutputTokens"] = 64000
-        if _is_gemini_3_6_flash(model):
-            # Gemini 3.6 Flash rejects legacy sampling and candidate count fields.
+        if _uses_strict_gemini_flash_request_rules(model):
+            # Gemini 3.6+ Flash rejects legacy sampling and candidate count fields.
             for key in ("temperature", "topP", "topK", "candidateCount"):
                 generation_config.pop(key, None)
         else:
@@ -1046,7 +1116,7 @@ async def normalize_gemini_request(
         
         result["contents"] = cleaned_contents
 
-        if _is_gemini_3_6_flash(model):
+        if _uses_strict_gemini_flash_request_rules(model):
             removed_count = 0
             while (
                 result["contents"]
@@ -1056,8 +1126,9 @@ async def normalize_gemini_request(
                 result["contents"].pop()
                 removed_count += 1
             if removed_count:
+                base_model = get_base_model_name(model)
                 log.warning(
-                    "[GEMINI_FIX] Gemini 3.6 Flash does not support prefilled model turns; "
+                    f"[GEMINI_FIX] {base_model} does not support prefilled model turns; "
                     f"removed {removed_count} trailing model message(s)"
                 )
 
