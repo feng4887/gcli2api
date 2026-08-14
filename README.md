@@ -2,7 +2,7 @@
 
 **将 GeminiCLI 和 Antigravity 转换为 OpenAI 、GEMINI 和 Claude API 兼容接口**
 
-support latest **gemini-3.6-flash-high**
+支持最新正式版 **gemini-3.7-flash**
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: CNC-1.0](https://img.shields.io/badge/License-CNC--1.0-red.svg)](LICENSE)
@@ -260,6 +260,9 @@ ghcr.io/su-kaka/gcli2api:latest
 - `gemini-3.1-flash-lite`
 - `gemini-3.5-flash`
 - `gemini-3.6-flash`（稳定版，支持 `minimal`、`low`、`medium`、`high` 推理等级）
+- `gemini-3.7-flash`（正式版，支持 `low`、`medium`、`high` 推理等级，默认 `medium`）
+
+Gemini 3.7 Flash 的正式模型 ID 与迁移约束见 [Google 官方说明](https://ai.google.dev/gemini-api/docs/latest-model)。
 
 > `/v1/models` 会展示网关已接入的模型名；实际可调用性仍取决于 OAuth 凭证对应的 Google 项目、区域和配额。完成认证后，请用一个最小 `generateContent` 请求进行验证。
 
