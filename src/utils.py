@@ -64,6 +64,7 @@ BASE_MODELS = [
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
+    "gemini-3.7-flash",
 ]
 
 
@@ -119,8 +120,11 @@ def get_available_models(router_type: str = "openai") -> List[str]:
         # Gemini 3 系列: 使用思考等级后缀
         elif "gemini-3" in base_model:
             if "flash" in base_model:
-                # Gemini 3 Flash models: support high/medium/low/minimal.
-                thinking_suffixes = ["-high", "-medium", "-low", "-minimal"]
+                # Gemini 3.7 Flash supports high/medium/low; older Flash models
+                # also support minimal.
+                thinking_suffixes = ["-high", "-medium", "-low"]
+                if base_model != "gemini-3.7-flash":
+                    thinking_suffixes.append("-minimal")
             elif base_model == "gemini-3.1-pro-preview":
                 # Gemini 3.1 Pro supports high/medium/low thinking levels.
                 thinking_suffixes = ["-high", "-medium", "-low"]
