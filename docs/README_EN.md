@@ -258,6 +258,9 @@ All models have 1M context window capacity. Each credential file provides 1000 r
 - `gemini-3.1-flash-lite`
 - `gemini-3.5-flash`
 - `gemini-3.6-flash` (stable; supports `minimal`, `low`, `medium`, and `high` thinking levels)
+- `gemini-3.7-flash` (GA; supports `low`, `medium`, and `high` thinking levels; defaults to `medium`)
+
+See the [official Google guide](https://ai.google.dev/gemini-api/docs/latest-model) for the Gemini 3.7 Flash model ID and migration constraints.
 
 > `/v1/models` exposes the gateway model identifiers. Actual availability still depends on the authenticated Google project, region, and quota; verify it with a minimal `generateContent` request after OAuth authentication.
 

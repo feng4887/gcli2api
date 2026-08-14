@@ -258,6 +258,9 @@ ghcr.io/su-kaka/gcli2api:latest
 - `gemini-3.1-flash-lite`
 - `gemini-3.5-flash`
 - `gemini-3.6-flash`
+- `gemini-3.7-flash`（GA、`low`・`medium`・`high` のThinkingレベルに対応、既定値は `medium`）
+
+Gemini 3.7 Flash のモデルIDと移行要件は、[Google公式ガイド](https://ai.google.dev/gemini-api/docs/latest-model)を参照してください。
 
 ### 🧠 Thinkingモデル
 - `gemini-2.5-pro-high`: Thinkingモード
