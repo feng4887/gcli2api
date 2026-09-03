@@ -27,6 +27,7 @@ VERTEX_MODELS = [
     "gemini-3.5-flash",
     "gemini-3.6-flash",
     "gemini-3.7-flash",
+    "gemini-3.8-flash",
 ]
 
 # 本地模块 - 基础路由工具

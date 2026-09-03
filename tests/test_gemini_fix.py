@@ -47,6 +47,12 @@ def test_model_lists_include_gemini_3_1_pro_and_current_flash_models():
     assert "gemini-3.7-flash-low" in models
     assert "gemini-3.7-flash-minimal" not in models
     assert "gemini-3.7-flash" in VERTEX_MODELS
+    assert "gemini-3.8-flash" in models
+    assert "gemini-3.8-flash-high" in models
+    assert "gemini-3.8-flash-medium" in models
+    assert "gemini-3.8-flash-low" in models
+    assert "gemini-3.8-flash-minimal" not in models
+    assert "gemini-3.8-flash" in VERTEX_MODELS
 
 
 def test_gemini_3_thinking_levels_match_model_capabilities():
@@ -56,10 +62,14 @@ def test_gemini_3_thinking_levels_match_model_capabilities():
     assert get_thinking_settings("gemini-3.7-flash-medium") == (None, "MEDIUM")
     assert get_thinking_settings("gemini-3.7-flash-low") == (None, "LOW")
     assert get_thinking_settings("gemini-3.7-flash-minimal") == (None, "LOW")
+    assert get_thinking_settings("gemini-3.8-flash-high") == (None, "HIGH")
+    assert get_thinking_settings("gemini-3.8-flash-medium") == (None, "MEDIUM")
+    assert get_thinking_settings("gemini-3.8-flash-low") == (None, "LOW")
+    assert get_thinking_settings("gemini-3.8-flash-minimal") == (None, "LOW")
 
 
-def test_antigravity_maps_gemini_3_6_and_3_7_flash_without_dead_branches():
-    for base_model in ("gemini-3.6-flash", "gemini-3.7-flash"):
+def test_antigravity_maps_current_gemini_flash_models_without_dead_branches():
+    for base_model in ("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"):
         assert (
             map_antigravity_gemini_model(f"{base_model}-high", "LOW", None)
             == f"{base_model}-high"
@@ -82,16 +92,18 @@ def test_antigravity_maps_gemini_3_6_and_3_7_flash_without_dead_branches():
         assert map_antigravity_gemini_model(base_model, None, None) == f"{base_model}-medium"
 
 
-def test_antigravity_normalization_maps_gemini_3_7_and_applies_request_rules(monkeypatch):
+def test_antigravity_normalization_maps_gemini_3_8_and_applies_request_rules(monkeypatch):
     monkeypatch.setenv("RETURN_THOUGHTS_TO_FRONTEND", "false")
     request = {
-        "model": "gemini-3.7-flash",
+        "model": "gemini-3.8-flash",
         "generationConfig": {
             "thinkingConfig": {"thinkingLevel": "HIGH"},
             "temperature": 0.7,
             "topP": 0.9,
             "topK": 40,
             "candidateCount": 2,
+            "frequencyPenalty": 0.5,
+            "presencePenalty": 0.5,
         },
         "contents": [
             {"role": "user", "parts": [{"text": "Hello"}]},
@@ -101,30 +113,31 @@ def test_antigravity_normalization_maps_gemini_3_7_and_applies_request_rules(mon
 
     result = asyncio.run(normalize_gemini_request(request, mode="antigravity"))
 
-    assert result["model"] == "gemini-3.7-flash-high"
+    assert result["model"] == "gemini-3.8-flash-high"
     assert result["generationConfig"] == {"maxOutputTokens": 64000}
     assert result["contents"] == [{"role": "user", "parts": [{"text": "Hello"}]}]
 
 
-def test_gemini_3_7_migrates_legacy_thinking_budget_to_supported_level(monkeypatch):
+def test_gemini_3_7_and_3_8_migrate_legacy_thinking_budget_to_supported_level(monkeypatch):
     monkeypatch.setenv("RETURN_THOUGHTS_TO_FRONTEND", "false")
-    request = {
-        "model": "gemini-3.7-flash",
-        "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
-        "contents": [{"role": "user", "parts": [{"text": "Hello"}]}],
-    }
+    for model in ("gemini-3.7-flash", "gemini-3.8-flash"):
+        request = {
+            "model": model,
+            "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
+            "contents": [{"role": "user", "parts": [{"text": "Hello"}]}],
+        }
 
-    result = asyncio.run(normalize_gemini_request(request, mode="geminicli"))
+        result = asyncio.run(normalize_gemini_request(request, mode="geminicli"))
 
-    assert result["generationConfig"] == {
-        "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": False},
-        "maxOutputTokens": 64000,
-    }
+        assert result["generationConfig"] == {
+            "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": False},
+            "maxOutputTokens": 64000,
+        }
 
 
-def test_gemini_3_6_and_3_7_normalization_removes_unsupported_request_fields(monkeypatch):
+def test_current_gemini_flash_normalization_removes_unsupported_request_fields(monkeypatch):
     monkeypatch.setenv("RETURN_THOUGHTS_TO_FRONTEND", "false")
-    for model in ("gemini-3.6-flash", "gemini-3.7-flash"):
+    for model in ("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"):
         request = {
             "model": model,
             "generationConfig": {
@@ -143,4 +156,20 @@ def test_gemini_3_6_and_3_7_normalization_removes_unsupported_request_fields(mon
 
         assert result["generationConfig"] == {"maxOutputTokens": 64000}
         assert result["contents"] == [{"role": "user", "parts": [{"text": "Hello"}]}]
+
+
+def test_gemini_3_8_normalization_removes_penalty_fields(monkeypatch):
+    monkeypatch.setenv("RETURN_THOUGHTS_TO_FRONTEND", "false")
+    request = {
+        "model": "gemini-3.8-flash",
+        "generationConfig": {
+            "frequencyPenalty": 0.5,
+            "presencePenalty": 0.5,
+        },
+        "contents": [{"role": "user", "parts": [{"text": "Hello"}]}],
+    }
+
+    result = asyncio.run(normalize_gemini_request(request, mode="geminicli"))
+
+    assert result["generationConfig"] == {"maxOutputTokens": 64000}
 

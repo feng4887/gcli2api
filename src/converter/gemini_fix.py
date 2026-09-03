@@ -559,7 +559,11 @@ def get_base_model_name(model_name: str) -> str:
     return result
 
 
-_STRICT_GEMINI_FLASH_MODELS = frozenset({"gemini-3.6-flash", "gemini-3.7-flash"})
+_STRICT_GEMINI_FLASH_MODELS = frozenset({
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+})
 _ANTIGRAVITY_EXACT_MODEL_IDS = frozenset({
     "gemini-3-flash",
     "gemini-3-flash-agent",
@@ -578,6 +582,10 @@ _ANTIGRAVITY_EXACT_MODEL_IDS = frozenset({
     "gemini-3.7-flash-medium",
     "gemini-3.7-flash-low",
     "gemini-3.7-flash-tiered",
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-low",
+    "gemini-3.8-flash-tiered",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -601,7 +609,7 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
 
     支持两种模式:
     1. CLI 模式思考预算 (Gemini 2.5 系列): -max, -high, -medium, -low, -minimal
-    2. CLI 模式思考等级 (Gemini 3 系列): -high, -medium, -low；旧版 Flash 还支持 -minimal
+    2. CLI 模式思考等级 (Gemini 3 系列): -high, -medium, -low；Gemini 3.6 Flash 还支持 -minimal
     3. 兼容旧模式: -maxthinking, -nothinking (不返回给用户)
 
     Returns:
@@ -640,8 +648,8 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
             return None, "LOW"
         elif "-minimal" in model_name:
             if "flash" in base_model:
-                # Gemini 3.7 Flash exposes low as its smallest supported thinking level.
-                if base_model == "gemini-3.7-flash":
+                # Gemini 3.7+ Flash exposes low as its smallest supported thinking level.
+                if base_model in {"gemini-3.7-flash", "gemini-3.8-flash"}:
                     return None, "LOW"
                 return None, "MINIMAL"
             return None, None
@@ -1047,9 +1055,13 @@ async def normalize_gemini_request(
         # 强制设置 maxOutputTokens 为 64000
         generation_config["maxOutputTokens"] = 64000
         if _uses_strict_gemini_flash_request_rules(model):
-            # Gemini 3.6+ Flash rejects legacy sampling and candidate count fields.
+            # Gemini 3.6+ Flash rejects legacy sampling and candidate fields.
             for key in ("temperature", "topP", "topK", "candidateCount"):
                 generation_config.pop(key, None)
+            if get_base_model_name(model.lower()) == "gemini-3.8-flash":
+                # Gemini 3.8 Flash additionally rejects OpenAI-style penalty fields.
+                for key in ("frequencyPenalty", "presencePenalty"):
+                    generation_config.pop(key, None)
         else:
             # 强制设置 topK 为 64
             generation_config["topK"] = 64
