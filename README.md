@@ -1,6 +1,6 @@
 # GeminiCLI to API
 
-**将最新正式版 gemini-3.8-flash GeminiCLI 和 Antigravity 转换为 OpenAI 、GEMINI 和 Claude API 兼容接口**
+**Convert the latest official gemini-3.8-flash GeminiCLI and Antigravity into OpenAI, GEMINI, and Claude API-compatible interfaces**
 
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
