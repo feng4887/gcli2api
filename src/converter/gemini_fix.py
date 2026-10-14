@@ -598,9 +598,10 @@ _ANTIGRAVITY_EXACT_MODEL_IDS = frozenset({
 })
 
 
-def _uses_strict_gemini_flash_request_rules(model_name: str) -> bool:
+def _uses_strict_gemini_request_rules(model_name: str) -> bool:
     """Return whether the model rejects legacy sampling fields and prefilled turns."""
-    return get_base_model_name(model_name.lower()) in _STRICT_GEMINI_FLASH_MODELS
+    base_model = get_base_model_name(model_name.lower())
+    return base_model in _STRICT_GEMINI_FLASH_MODELS or base_model == "gemini-4-argon"
 
 
 def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]]:
@@ -616,6 +617,16 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
         (thinking_budget, thinking_level): 思考预算和思考等级
     """
     base_model = get_base_model_name(model_name)
+
+    if base_model == "gemini-4-argon":
+        # Legacy aliases must not produce unsupported budgets or MINIMAL.
+        if "-high" in model_name or "-maxthinking" in model_name or "-max" in model_name:
+            return None, "HIGH"
+        if "-medium" in model_name:
+            return None, "MEDIUM"
+        if any(suffix in model_name for suffix in ("-low", "-minimal", "-nothinking")):
+            return None, "LOW"
+        return None, None
 
     # ========== 兼容旧模式 (不返回给用户) ==========
     if "-nothinking" in model_name:
@@ -713,9 +724,14 @@ def _resolve_thinking_settings(
             thinking_budget = thinking_config.get("thinkingBudget")
             thinking_level = thinking_config.get("thinkingLevel")
 
-    if _uses_strict_gemini_flash_request_rules(model_name) and thinking_budget is not None:
+    if _uses_strict_gemini_request_rules(model_name) and thinking_budget is not None:
         thinking_level = _legacy_budget_to_thinking_level(model_name, thinking_budget)
         thinking_budget = None
+
+    if get_base_model_name(model_name.lower()) == "gemini-4-argon" and thinking_level:
+        thinking_level = thinking_level.upper()
+        if thinking_level == "MINIMAL":
+            thinking_level = "LOW"
 
     return thinking_budget, thinking_level
 
@@ -828,6 +844,11 @@ async def normalize_gemini_request(
     result = request.copy()
     model = result.get("model", "")
     generation_config = (result.get("generationConfig") or {}).copy()  # 创建副本避免修改原对象
+    if isinstance(generation_config.get("thinkingConfig"), dict):
+        generation_config["thinkingConfig"] = generation_config["thinkingConfig"].copy()
+    is_argon = get_base_model_name(model.lower()) == "gemini-4-argon"
+    if is_argon:
+        result.pop("cachedContent", None)
     tools = result.get("tools")
     system_instruction = result.get("systemInstruction") or result.get("system_instructions")
     
@@ -838,7 +859,7 @@ async def normalize_gemini_request(
     return_thoughts = await get_return_thoughts_to_frontend()
 
     # ========== 模式特定处理 ==========
-    if mode == "geminicli":
+    if mode == "geminicli" or (mode == "vertex" and is_argon):
         # 1. 思考设置
         thinking_budget, thinking_level = _resolve_thinking_settings(model, generation_config)
 
@@ -864,7 +885,7 @@ async def normalize_gemini_request(
             base_model = get_base_model_name(model)
             if "pro" in base_model:
                 include_thoughts = return_thoughts
-            elif "gemini-3" in base_model and "flash" in base_model:
+            elif is_argon or ("gemini-3" in base_model and "flash" in base_model):
                 if thinking_level is None:
                     include_thoughts = False
                 else:
@@ -924,7 +945,14 @@ async def normalize_gemini_request(
                 
                 # 既然 Antigravity 后端是通过模型名（如 -high/-low）来确定思考深度的，
                 # 对于 Gemini 3/3.5 模型必须移除 thinkingLevel 配置以防止 API 返回参数冲突错误。
-                if "gemini-3" in model or "gemini-3.5" in model:
+                if is_argon and thinking_level is not None:
+                    # Keep the public ID and level; private Argon transport aliases
+                    # have not been verified against fetchAvailableModels.
+                    generation_config["thinkingConfig"] = {
+                        "thinkingLevel": thinking_level,
+                        "includeThoughts": return_thoughts,
+                    }
+                elif "gemini-3" in model or "gemini-3.5" in model:
                     generation_config.pop("thinkingConfig", None)
                 else:
                     # 对于 Gemini 2.5 系列，保留 thinkingConfig
@@ -1052,14 +1080,19 @@ async def normalize_gemini_request(
 
     # 2. Parameter compatibility and range limits.
     if generation_config:
-        # 强制设置 maxOutputTokens 为 64000
-        generation_config["maxOutputTokens"] = 64000
-        if _uses_strict_gemini_flash_request_rules(model):
+        # Preserve Argon's caller limit within the existing single-request cap.
+        if is_argon:
+            generation_config["maxOutputTokens"] = min(
+                generation_config.get("maxOutputTokens") or 64000, 64000
+            )
+        else:
+            generation_config["maxOutputTokens"] = 64000
+        if _uses_strict_gemini_request_rules(model):
             # Gemini 3.6+ Flash rejects legacy sampling and candidate fields.
             for key in ("temperature", "topP", "topK", "candidateCount"):
                 generation_config.pop(key, None)
-            if get_base_model_name(model.lower()) == "gemini-3.8-flash":
-                # Gemini 3.8 Flash additionally rejects OpenAI-style penalty fields.
+            if is_argon or get_base_model_name(model.lower()) == "gemini-3.8-flash":
+                # These models reject OpenAI-style penalty fields.
                 for key in ("frequencyPenalty", "presencePenalty"):
                     generation_config.pop(key, None)
         else:
@@ -1128,7 +1161,7 @@ async def normalize_gemini_request(
         
         result["contents"] = cleaned_contents
 
-        if _uses_strict_gemini_flash_request_rules(model):
+        if _uses_strict_gemini_request_rules(model):
             removed_count = 0
             while (
                 result["contents"]
