@@ -66,6 +66,7 @@ BASE_MODELS = [
     "gemini-3.6-flash",
     "gemini-3.7-flash",
     "gemini-3.8-flash",
+    "gemini-4-argon",
 ]
 
 
@@ -115,8 +116,11 @@ def get_available_models(router_type: str = "openai") -> List[str]:
         # 定义思考后缀（根据模型系列不同）
         thinking_suffixes = []
 
+        # Argon supports three thinking levels and defaults to medium.
+        if base_model == "gemini-4-argon":
+            thinking_suffixes = ["-high", "-medium", "-low"]
         # Gemini 2.5 系列: 使用思考预算后缀
-        if "gemini-2.5" in base_model:
+        elif "gemini-2.5" in base_model:
             thinking_suffixes = ["-max", "-high", "-medium", "-low", "-minimal"]
         # Gemini 3 系列: 使用思考等级后缀
         elif "gemini-3" in base_model:

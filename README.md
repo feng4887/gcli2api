@@ -1,6 +1,6 @@
 # GeminiCLI to API
 
-**Convert the latest official gemini-3.8-flash GeminiCLI and Antigravity into OpenAI, GEMINI, and Claude API-compatible interfaces**
+**Convert GeminiCLI and Antigravity into OpenAI, GEMINI, and Claude API-compatible interfaces, with Gemini 4 Argon model support**
 
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -249,7 +249,7 @@ ghcr.io/su-kaka/gcli2api:latest
 
 ## 支持的模型
 
-所有模型均具备 1M 上下文窗口容量。每个凭证文件提供 1000 次请求额度。
+模型上下文容量、请求额度和可用性取决于具体模型、通道及凭证权限；模型列表不代表账号已经获得访问权限。
 
 ### 🤖 基础模型
 - `gemini-2.5-pro`
@@ -261,8 +261,13 @@ ghcr.io/su-kaka/gcli2api:latest
 - `gemini-3.6-flash`（稳定版，支持 `minimal`、`low`、`medium`、`high` 推理等级）
 - `gemini-3.7-flash`（正式版，支持 `low`、`medium`、`high` 推理等级，默认 `medium`）
 - `gemini-3.8-flash`（正式版，支持 `low`、`medium`、`high` 推理等级，默认 `medium`）
+- `gemini-4-argon`（正式版，支持 `low`、`medium`、`high` 推理等级，默认 `medium`）
 
 Gemini 3.8 Flash 的正式模型 ID 与迁移约束见 [Google 官方说明](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)。
+
+Gemini 4 Argon 的正式模型 ID 与参数规则见 [Google 模型说明](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon)和[迁移指南](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon)。GeminiCLI 列表提供 `-low`、`-medium`、`-high`、`-search` 及现有功能前缀组合，Vertex 列表提供基础模型名。网关将旧思考预算和 `MINIMAL` 转换为支持的等级，清除采样、惩罚、候选数量和显式缓存字段，并移除末尾预填充回复。Argon 保留调用者设置的输出上限，最高沿用网关的 64,000 token 单请求上限；本次未接入长输出 continuation 协议。
+
+Antigravity 继续使用后端动态模型列表；仅当后端返回 Argon 模型时才会展示，不推测私有的 `-high`/`-low` 模型 ID。Google 公共 API 发布不等于 GeminiCLI/Antigravity OAuth 通道已开放；Argon 不适用于公共 Gemini API 免费层或 Google AI Pro 计划，实际支持须用对应账号验证。
 
 > `/v1/models` 会展示网关已接入的模型名；实际可调用性仍取决于 OAuth 凭证对应的 Google 项目、区域和配额。完成认证后，请用一个最小 `generateContent` 请求进行验证。
 
