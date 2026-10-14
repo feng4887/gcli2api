@@ -6,6 +6,7 @@ OpenAI Transfer Module - Handles conversion between OpenAI and Gemini API format
 import json
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pypinyin import Style, lazy_pinyin
@@ -19,6 +20,20 @@ from src.converter.thoughtSignature_fix import (
 from src.converter.utils import merge_system_messages
 
 from log import log
+
+# Track tool indices across chunks instead of reusing each chunk's part index.
+_STREAM_TOOL_INDEX: "OrderedDict[str, int]" = OrderedDict()
+_STREAM_TOOL_INDEX_MAX_ENTRIES = 512
+
+
+def _next_stream_tool_call_indices(response_id: str, count: int) -> List[int]:
+    """Allocate consecutive indices and bound state for abandoned streams."""
+    base = _STREAM_TOOL_INDEX.get(response_id, 0)
+    _STREAM_TOOL_INDEX[response_id] = base + count
+    _STREAM_TOOL_INDEX.move_to_end(response_id)
+    while len(_STREAM_TOOL_INDEX) > _STREAM_TOOL_INDEX_MAX_ENTRIES:
+        _STREAM_TOOL_INDEX.popitem(last=False)
+    return list(range(base, base + count))
 
 def _convert_usage_metadata(usage_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -1355,8 +1370,35 @@ async def convert_openai_to_gemini_request(openai_request: Dict[str, Any]) -> Di
 
                     parts.append(function_call_part)
                 except (json.JSONDecodeError, KeyError) as e:
-                    log.error(f"Failed to parse tool call: {e}")
-                    continue
+                    # Keep the historical call paired with its functionResponse.
+                    function = tool_call.get("function") or {}
+                    degraded_name = function.get("name")
+                    if not degraded_name:
+                        log.error(f"Failed to parse tool call (dropped, no name): {e}")
+                        continue
+                    raw_args = function.get("arguments", "")
+                    degraded_args = {}
+                    if isinstance(raw_args, str) and raw_args:
+                        try:
+                            recovered, _ = json.JSONDecoder().raw_decode(raw_args.lstrip())
+                        except ValueError:
+                            recovered = None
+                        if isinstance(recovered, dict):
+                            degraded_args = recovered
+                    if degraded_args and degraded_name in tool_schemas:
+                        degraded_args = fix_tool_call_args_types(
+                            degraded_args, tool_schemas[degraded_name]
+                        )
+                    original_id, _ = decode_tool_id_and_signature(tool_call.get("id", ""))
+                    log.warning(f"Failed to parse tool call: {e} - keeping historical call {degraded_name}")
+                    parts.append({
+                        "functionCall": {
+                            "id": original_id,
+                            "name": degraded_name,
+                            "args": degraded_args,
+                        },
+                        "thoughtSignature": SKIP_THOUGHT_SIGNATURE_VALIDATOR,
+                    })
 
             if parts:
                 contents.append({"role": role, "parts": parts})
@@ -1391,6 +1433,17 @@ async def convert_openai_to_gemini_request(openai_request: Dict[str, Any]) -> Di
     # 循环结束后，flush 剩余的 tool parts（如果消息列表以 tool 消息结尾）
     flush_pending_tool_parts()
     _sanitize_openai_roundtrip_signatures(contents)
+
+    # Tool responses and a following user message share Gemini's user role.
+    merged_contents = []
+    for content in contents:
+        if not content.get("parts"):
+            continue
+        if merged_contents and merged_contents[-1]["role"] == content["role"]:
+            merged_contents[-1]["parts"].extend(content["parts"])
+        else:
+            merged_contents.append(content)
+    contents = merged_contents
 
     # 构建生成配置
     generation_config = {}
@@ -1716,6 +1769,12 @@ def convert_gemini_to_openai_stream(
         # 提取工具调用和文本内容 (流式需要 index)
         tool_calls, text_content = extract_tool_calls_from_parts(parts, is_streaming=True)
 
+        if tool_calls:
+            for tool_call, stream_index in zip(
+                tool_calls, _next_stream_tool_call_indices(response_id, len(tool_calls))
+            ):
+                tool_call["index"] = stream_index
+
         # 提取多种类型的内容
         content_parts = []
         reasoning_parts = []
@@ -1784,11 +1843,13 @@ def convert_gemini_to_openai_stream(
 
         # 获取 Gemini 的 finishReason
         gemini_finish_reason = candidate.get("finishReason")
-        finish_reason = _map_finish_reason(gemini_finish_reason)
+        # Intermediate chunks must not tell clients that the stream has ended.
+        finish_reason = _map_finish_reason(gemini_finish_reason) if gemini_finish_reason else None
         
         # 只有在正常停止（STOP）且有工具调用时才设为 tool_calls
         # 避免在 SAFETY、MAX_TOKENS 等情况下仍然返回 tool_calls 导致循环
-        if tool_calls and gemini_finish_reason == "STOP":
+        had_tools = bool(tool_calls or _STREAM_TOOL_INDEX.get(response_id, 0) > 0)
+        if had_tools and gemini_finish_reason == "STOP":
             finish_reason = "tool_calls"
 
         choices.append({
@@ -1796,6 +1857,9 @@ def convert_gemini_to_openai_stream(
             "delta": delta,
             "finish_reason": finish_reason,
         })
+
+    if any(choice.get("finish_reason") for choice in choices):
+        _STREAM_TOOL_INDEX.pop(response_id, None)
 
     # 转换 usageMetadata (只在流结束时存在)
     usage = _convert_usage_metadata(gemini_response.get("usageMetadata"))
