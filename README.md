@@ -710,9 +710,14 @@ curl -X POST "http://127.0.0.1:7861/antigravity/v1/messages" \
 ```
 
 **支持的 Antigravity 模型：**
-- Claude 系列：`claude-sonnet-4-5`、`claude-opus-4-5` 等
+- Claude 5.5：支持 `claude-sonnet-5-5`、`claude-sonnet-5-5-thinking`、`claude-opus-5-5`、`claude-opus-5-5-thinking` 的精确 ID 透传，保留后端的 `-thinking` 名称，不再映射回 4.6。请使用 `/antigravity/v1/models` 返回的精确 ID；网关不会凭空添加账号不可用的模型，也不会将基础 ID 与 `-thinking` ID 互相猜测映射。
+- Claude 4.6：保留 `claude-sonnet-4-6`、`claude-sonnet-4-6-thinking`、`claude-opus-4-6-thinking` 等既有兼容别名。
 - Gemini 系列：`gemini-2.5-flash`、`gemini-2.5-pro` 等
 - 自动支持思维模型（thinking models）
+
+Claude Sonnet 5.5 和 Opus 5.5 使用后端自适应思考；网关不再注入旧数值思考预算或虚构的历史思考块，保留有效的工具调用与思考签名，并清除自定义采样参数及末尾预填充回复。输出上限保留调用者值，最高沿用网关的 64,000 token 单请求上限。本次未增加原生 Claude effort、between_tools 或强制工具选择协议转换。
+
+[Antigravity 官方模型目录](https://antigravity.google/docs/models)列出了 Sonnet 5.5（thinking）和 Opus 5.5（thinking），支持非试用 Google AI Pro、Ultra 和 Enterprise；Claude 4.6 计划于 2026-11-02 移除。模型权限和迁移规则以当前官方目录及账号后端为准，代码适配不代表真实账号调用已经验证。
 
 **Gemini 原生示例：**
 ```python

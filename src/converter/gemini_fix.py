@@ -564,6 +564,12 @@ _STRICT_GEMINI_FLASH_MODELS = frozenset({
     "gemini-3.7-flash",
     "gemini-3.8-flash",
 })
+_ANTIGRAVITY_CLAUDE_5_5_MODEL_IDS = frozenset({
+    "claude-sonnet-5-5",
+    "claude-sonnet-5-5-thinking",
+    "claude-opus-5-5",
+    "claude-opus-5-5-thinking",
+})
 _ANTIGRAVITY_EXACT_MODEL_IDS = frozenset({
     "gemini-3-flash",
     "gemini-3-flash-agent",
@@ -847,6 +853,12 @@ async def normalize_gemini_request(
     if isinstance(generation_config.get("thinkingConfig"), dict):
         generation_config["thinkingConfig"] = generation_config["thinkingConfig"].copy()
     is_argon = get_base_model_name(model.lower()) == "gemini-4-argon"
+    is_claude_5_5 = (
+        mode == "antigravity"
+        and get_base_model_name(model.lower()) in _ANTIGRAVITY_CLAUDE_5_5_MODEL_IDS
+    )
+    if is_claude_5_5 and isinstance(result.get("contents"), list):
+        result["contents"] = result["contents"].copy()
     if is_argon:
         result.pop("cachedContent", None)
     tools = result.get("tools")
@@ -966,7 +978,10 @@ async def normalize_gemini_request(
                         thinking_config["includeThoughts"] = return_thoughts
             else:
                 # 针对非 Gemini 模型（如 Claude）
-                if is_thinking_model(model) or thinking_budget is not None or thinking_level is not None:
+                if is_claude_5_5:
+                    # Claude 5.5 uses backend adaptive thinking, not legacy budgets.
+                    generation_config["thinkingConfig"] = {"includeThoughts": return_thoughts}
+                elif is_thinking_model(model) or thinking_budget is not None or thinking_level is not None:
                     # 直接设置 thinkingConfig
                     if "thinkingConfig" not in generation_config:
                         generation_config["thinkingConfig"] = {}
@@ -1001,11 +1016,11 @@ async def normalize_gemini_request(
                         for content in contents
                     )
                     
-                    if has_tool_calls:
+                    if has_tool_calls and not is_claude_5_5:
                         # MCP 场景：检测到工具调用，移除 thinkingConfig
                         log.warning(f"[ANTIGRAVITY] 检测到工具调用（MCP场景），移除 thinkingConfig 避免失效")
                         generation_config.pop("thinkingConfig", None)
-                    else:
+                    elif not is_claude_5_5:
                         # 非 MCP 场景：填充思考块
                         # 找到最后一个 model 角色的 content
                         for i in range(len(contents) - 1, -1, -1):
@@ -1023,14 +1038,17 @@ async def normalize_gemini_request(
                                     log.debug(f"[ANTIGRAVITY] 已在最后一个 assistant 消息开头插入思考块（含跳过验证签名）")
                                 break
                 
-            # 移除 -thinking 等后缀并提取基础名
+            # Preserve exact Claude 5.5 backend IDs, including -thinking.
             if "claude" in model.lower():
-                model = get_base_model_name(model).replace("-thinking", "")
+                model = get_base_model_name(model)
+                if not is_claude_5_5:
+                    model = model.replace("-thinking", "")
 
-                # 4. Claude 模型关键词映射
-                # 使用关键词匹配而不是精确匹配，更灵活地处理各种变体
+                # Keep existing keyword aliases for older Claude models.
                 original_model = model
-                if "opus" in model.lower():
+                if is_claude_5_5:
+                    model = model.lower()
+                elif "opus" in model.lower():
                     model = "claude-opus-4-6-thinking"
                 elif "sonnet" in model.lower():
                     model = "claude-sonnet-4-6"
@@ -1046,7 +1064,7 @@ async def normalize_gemini_request(
 
         # 5. 模型特殊处理：循环移除末尾的 model 消息，保证以用户消息结尾
         # 因为该模型不支持预填充
-        if "claude-opus-4-6-thinking" in model.lower() or "claude-sonnet-4-6" in model.lower():
+        if is_claude_5_5 or "claude-opus-4-6-thinking" in model.lower() or "claude-sonnet-4-6" in model.lower():
             contents = result.get("contents", [])
             removed_count = 0
             while contents and isinstance(contents[-1], dict) and contents[-1].get("role") == "model":
@@ -1080,14 +1098,18 @@ async def normalize_gemini_request(
 
     # 2. Parameter compatibility and range limits.
     if generation_config:
-        # Preserve Argon's caller limit within the existing single-request cap.
-        if is_argon:
+        # Preserve caller limits for newer models within the single-request cap.
+        if is_argon or is_claude_5_5:
             generation_config["maxOutputTokens"] = min(
                 generation_config.get("maxOutputTokens") or 64000, 64000
             )
         else:
             generation_config["maxOutputTokens"] = 64000
-        if _uses_strict_gemini_request_rules(model):
+        if is_claude_5_5:
+            # Let Claude 5.5 use its backend sampling defaults.
+            for key in ("temperature", "topP", "topK"):
+                generation_config.pop(key, None)
+        elif _uses_strict_gemini_request_rules(model):
             # Gemini 3.6+ Flash rejects legacy sampling and candidate fields.
             for key in ("temperature", "topP", "topK", "candidateCount"):
                 generation_config.pop(key, None)
