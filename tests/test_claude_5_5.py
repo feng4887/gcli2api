@@ -121,6 +121,9 @@ def test_claude_5_5_dynamic_discovery_and_both_model_formats(monkeypatch):
         return_value=httpx.Response(200, json={"models": backend}),
     ))
     available = asyncio.run(api.fetch_available_models())
+    assert api.post_async.await_args.kwargs["headers"]["User-Agent"] == (
+        "antigravity/hub/2.23.1 darwin/arm64"
+    )
     assert {entry["id"] for entry in available} == set(CLAUDE_MODELS)
     monkeypatch.setattr(model_list, "fetch_available_models", AsyncMock(return_value=available))
     for endpoint, key, field in (
