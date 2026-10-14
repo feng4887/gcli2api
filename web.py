@@ -99,6 +99,32 @@ async def _memory_trim_loop():
 _memory_trim_task = None
 
 
+# ==================== Antigravity 可用模型缓存 ====================
+
+# 后端模型目录随 Google 侧上下线变化，启动时预热并定期刷新，
+# 供 src.converter.gemini_fix 的映射做同族降级（如 3.8-flash 固定档 → tiered）。
+_antigravity_model_cache_task = None
+_MODEL_CACHE_INTERVAL = 1800  # 30 分钟
+
+
+async def _antigravity_model_cache_loop():
+    while True:
+        try:
+            from src.api.antigravity import fetch_available_models
+
+            models = await fetch_available_models()
+            if models:
+                log.info(f"[MODEL CACHE] Antigravity 可用模型缓存已刷新（{len(models)} 个）")
+            else:
+                log.warning("[MODEL CACHE] 刷新 Antigravity 模型缓存失败，沿用上次结果")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning(f"[MODEL CACHE] 刷新 Antigravity 模型缓存异常: {e}")
+        await asyncio.sleep(_MODEL_CACHE_INTERVAL)
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -142,7 +168,14 @@ async def lifespan(app: FastAPI):
     else:
         log.info("[MEM] 内存回收任务已启动（仅 gc.collect，malloc_trim 不可用）")
 
+    # 启动 Antigravity 可用模型缓存刷新任务
+    global _antigravity_model_cache_task
+    _antigravity_model_cache_task = asyncio.create_task(
+        _antigravity_model_cache_loop(), name="antigravity_model_cache"
+    )
+
     yield
+
 
     # 清理资源
     log.info("开始关闭 GCLI2API 主服务")
@@ -153,8 +186,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f"关闭保活服务时出错: {e}")
 
+    # 停止模型缓存刷新任务
+    if _antigravity_model_cache_task and not _antigravity_model_cache_task.done():
+        _antigravity_model_cache_task.cancel()
+        try:
+            await _antigravity_model_cache_task
+        except asyncio.CancelledError:
+            pass
+
     # 停止内存回收任务
     if _memory_trim_task and not _memory_trim_task.done():
+
         _memory_trim_task.cancel()
         try:
             await _memory_trim_task

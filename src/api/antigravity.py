@@ -23,6 +23,8 @@ from src.credential_manager import credential_manager
 from src.httpx_client import stream_post_async, post_async
 from src.models import Model, model_to_dict
 from src.utils import ANTIGRAVITY_USER_AGENT
+from src.converter.gemini_fix import set_antigravity_available_model_ids
+
 
 # 导入共同的基础功能
 from src.api.utils import (
@@ -805,8 +807,14 @@ async def fetch_available_models() -> List[Dict[str, Any]]:
                 )
                 model_list.append(model_to_dict(claude_opus_model))
 
+            # 刷新映射层缓存：请求映射据此做同族降级
+            set_antigravity_available_model_ids(
+                [m.get("id") for m in model_list if isinstance(m, dict)]
+            )
+
             log.info(f"[ANTIGRAVITY] Fetched {len(model_list)} available models")
             return model_list
+
         else:
             log.error(f"[ANTIGRAVITY] Failed to fetch models ({response.status_code}): {response.text[:500]}")
             return []

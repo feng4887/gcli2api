@@ -56,18 +56,19 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALLBACK_HOST = "localhost"
 
 # Model name lists for different features
+# 2026-10-14 按后端 fetchAvailableModels 实测集合重建：
+# gemini-3.1-pro-preview / gemini-3.5-flash / gemini-3.6-flash / gemini-3.7-flash /
+# gemini-4-argon 已从后端下线（请求返回 404），不再对外广告。
 BASE_MODELS = [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
+    "gemini-3.1-flash-image",
     "gemini-3.8-flash",
-    "gemini-4-argon",
 ]
+
 
 
 # ====================== Model Helper Functions ======================
@@ -116,26 +117,20 @@ def get_available_models(router_type: str = "openai") -> List[str]:
         # 定义思考后缀（根据模型系列不同）
         thinking_suffixes = []
 
-        # Argon supports three thinking levels and defaults to medium.
-        if base_model == "gemini-4-argon":
-            thinking_suffixes = ["-high", "-medium", "-low"]
         # Gemini 2.5 系列: 使用思考预算后缀
-        elif "gemini-2.5" in base_model:
+        if "gemini-2.5" in base_model:
             thinking_suffixes = ["-max", "-high", "-medium", "-low", "-minimal"]
         # Gemini 3 系列: 使用思考等级后缀
         elif "gemini-3" in base_model:
             if "flash" in base_model:
-                # Gemini 3.7+ Flash supports high/medium/low; older Flash models
-                # also support minimal.
+                # Gemini 3.8 Flash 只有 high/medium/low；其余 Flash 兼容 minimal。
                 thinking_suffixes = ["-high", "-medium", "-low"]
-                if base_model not in {"gemini-3.7-flash", "gemini-3.8-flash"}:
+                if base_model != "gemini-3.8-flash":
                     thinking_suffixes.append("-minimal")
-            elif base_model == "gemini-3.1-pro-preview":
-                # Gemini 3.1 Pro supports high/medium/low thinking levels.
-                thinking_suffixes = ["-high", "-medium", "-low"]
             elif "pro" in base_model:
-                # Older Gemini 3 Pro preview models support high/low.
+                # Gemini 3 Pro 系列支持 high/low。
                 thinking_suffixes = ["-high", "-low"]
+
 
         search_suffix = "-search"
 

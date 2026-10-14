@@ -564,7 +564,58 @@ _STRICT_GEMINI_FLASH_MODELS = frozenset({
     "gemini-3.7-flash",
     "gemini-3.8-flash",
 })
+# Antigravity 后端实际广告的模型 ID 集合（由 fetch_available_models 预热/刷新）。
+# 用途：请求映射出的精确 ID 若已不在后端目录中，按同族降级到仍在线的档位，
+# 避免后端只保留 tiered 档时固定档位（-high/-medium/-low）直接 404。
+_ANTIGRAVITY_AVAILABLE_MODEL_IDS: frozenset = frozenset()
+
+
+def set_antigravity_available_model_ids(model_ids) -> None:
+    """刷新后端可用模型 ID 缓存（None/空集合 = 未知，此时不做降级）。"""
+    global _ANTIGRAVITY_AVAILABLE_MODEL_IDS
+    _ANTIGRAVITY_AVAILABLE_MODEL_IDS = frozenset(m for m in (model_ids or ()) if m)
+
+
+# 同族降级顺序：键为请求模型的基础名（最长前缀优先），值为同族候选 ID。
+# 只做“同族内档位/别名收敛”，不做跨模型替换（如 3.1 Pro → 2.5 Pro、Claude 5.5 → 4.6）。
+_ANTIGRAVITY_FALLBACK_CHAINS = {
+    "gemini-3.8-flash": ("gemini-3.8-flash-tiered", "gemini-3.8-flash-high",
+                         "gemini-3.8-flash-medium", "gemini-3.8-flash-low"),
+    "gemini-3.7-flash": ("gemini-3.7-flash-tiered", "gemini-3.7-flash-high"),
+    "gemini-3.6-flash": ("gemini-3.6-flash-tiered", "gemini-3.6-flash-high"),
+    "gemini-3-flash-preview": ("gemini-3-flash",),
+    "gemini-3-flash-agent": ("gemini-3-flash",),
+    "gemini-3-flash": ("gemini-3-flash",),
+    "gpt-oss-120b": ("gpt-oss-120b-medium",),
+}
+
+
+def _antigravity_fallback_for(base_model: str):
+    """按最长前缀匹配返回同族降级候选链。"""
+    for key in sorted(_ANTIGRAVITY_FALLBACK_CHAINS, key=len, reverse=True):
+        if base_model == key or base_model.startswith(key):
+            return _ANTIGRAVITY_FALLBACK_CHAINS[key]
+    return ()
+
+
+def _ensure_antigravity_available(desired: str, model_name: str) -> str:
+    """desired 不在后端当前目录内时，按同族候选降级；无候选则原样返回。"""
+    live = _ANTIGRAVITY_AVAILABLE_MODEL_IDS
+    if not live or desired in live:
+        return desired
+    base_model = get_base_model_name(model_name.lower())
+    for candidate in _antigravity_fallback_for(base_model):
+        if candidate in live:
+            log.warning(
+                f"[ANTIGRAVITY] 模型 {model_name} 的映射目标 {desired} 不在后端目录，"
+                f"同族降级为 {candidate}"
+            )
+            return candidate
+    return desired
+
+
 _ANTIGRAVITY_CLAUDE_5_5_MODEL_IDS = frozenset({
+
     "claude-sonnet-5-5",
     "claude-sonnet-5-5-thinking",
     "claude-opus-5-5",
@@ -754,7 +805,8 @@ def is_thinking_model(model_name: str) -> bool:
     return "think" in model_name or "pro" in model_name.lower()
 
 
-def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str], thinking_budget: Optional[int]) -> str:
+def _map_antigravity_gemini_model_static(model_name: str, thinking_level: Optional[str], thinking_budget: Optional[int]) -> str:
+
     """
     将客户端请求的 Gemini 模型和思考参数，映射到 Antigravity 后端支持的精确模型 ID。
     """
@@ -825,7 +877,18 @@ def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str],
     return base_model
 
 
+def map_antigravity_gemini_model(
+    model_name: str, thinking_level: Optional[str], thinking_budget: Optional[int]
+) -> str:
+    """映射请求模型到 Antigravity 后端 ID，并在后端目录变化时做同族降级。"""
+    desired = _map_antigravity_gemini_model_static(
+        model_name, thinking_level, thinking_budget
+    )
+    return _ensure_antigravity_available(desired, model_name)
+
+
 async def normalize_gemini_request(
+
     request: Dict[str, Any],
     mode: str = "geminicli"
 ) -> Dict[str, Any]:
@@ -1062,7 +1125,14 @@ async def normalize_gemini_request(
                 if original_model != model:
                     log.debug(f"[ANTIGRAVITY] 映射模型: {original_model} -> {model}")
 
+            # 其余非 Gemini 模型（如 gpt-oss）：按后端目录做同族 ID 补全，
+            # 裸名 gpt-oss-120b 会补成后端广告的 gpt-oss-120b-medium。
+            if "gemini" not in model.lower() and "claude" not in model.lower():
+                model = _ensure_antigravity_available(model, model)
+                result["model"] = model
+
         # 5. 模型特殊处理：循环移除末尾的 model 消息，保证以用户消息结尾
+
         # 因为该模型不支持预填充
         if is_claude_5_5 or "claude-opus-4-6-thinking" in model.lower() or "claude-sonnet-4-6" in model.lower():
             contents = result.get("contents", [])

@@ -33,29 +33,73 @@ def test_antigravity_claude_tools_keep_schema_in_parameters():
     assert "parametersJsonSchema" not in declaration
 
 
-def test_model_lists_include_gemini_3_1_pro_and_current_flash_models():
+def test_model_lists_track_current_backend_offering():
+    """对外广告的模型必须与后端当前目录一致（2026-10-14 实测集合）。"""
     models = set(get_available_models())
 
-    assert "gemini-3.1-pro-preview" in models
-    assert "gemini-3.1-pro-preview-medium" in models
-    assert "gemini-3.6-flash" in models
-    assert "gemini-3.6-flash-minimal" in models
-    assert "gemini-3.6-flash" in VERTEX_MODELS
-    assert "gemini-3.7-flash" in models
-    assert "gemini-3.7-flash-high" in models
-    assert "gemini-3.7-flash-medium" in models
-    assert "gemini-3.7-flash-low" in models
-    assert "gemini-3.7-flash-minimal" not in models
-    assert "gemini-3.7-flash" in VERTEX_MODELS
-    assert "gemini-3.8-flash" in models
+    for offered in (
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-flash-image",
+        "gemini-3.8-flash",
+    ):
+        assert offered in models
+        assert offered in VERTEX_MODELS
+
     assert "gemini-3.8-flash-high" in models
     assert "gemini-3.8-flash-medium" in models
     assert "gemini-3.8-flash-low" in models
     assert "gemini-3.8-flash-minimal" not in models
-    assert "gemini-3.8-flash" in VERTEX_MODELS
+
+    for retired in (
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3-flash-preview",
+        "gemini-4-argon",
+    ):
+        assert retired not in models, f"{retired} 已从后端下线，不应再对外广告"
+        assert retired not in VERTEX_MODELS
+
+
+
+def test_antigravity_downgrades_tier_aliases_when_backend_advertises_tiered_only():
+    """后端只广告 tiered 档位时，固定档位与裸名必须收敛到 tiered，而不是 404。"""
+    from src.converter import gemini_fix
+
+    gemini_fix.set_antigravity_available_model_ids(
+        {"gemini-3.8-flash-tiered", "gemini-3-flash", "claude-opus-4-6-thinking"}
+    )
+    try:
+        assert (
+            map_antigravity_gemini_model("gemini-3.8-flash-high", "HIGH", None)
+            == "gemini-3.8-flash-tiered"
+        )
+        assert (
+            map_antigravity_gemini_model("gemini-3.8-flash", None, None)
+            == "gemini-3.8-flash-tiered"
+        )
+        # 后端目录里没有的旧别名收敛到同族在线的模型
+        assert (
+            map_antigravity_gemini_model("gemini-3-flash-high", "HIGH", None)
+            == "gemini-3-flash"
+        )
+        assert (
+            map_antigravity_gemini_model("gemini-3-flash-preview", None, None)
+            == "gemini-3-flash"
+        )
+        # 跨模型不做替换：后端没有的 ID 原样返回（由后端报 404）
+        assert map_antigravity_gemini_model("gemini-4-argon", None, None) == "gemini-4-argon"
+    finally:
+        gemini_fix.set_antigravity_available_model_ids(set())
 
 
 def test_gemini_3_thinking_levels_match_model_capabilities():
+
     assert get_thinking_settings("gemini-3.1-pro-preview-medium") == (None, "MEDIUM")
     assert get_thinking_settings("gemini-3.6-flash-minimal") == (None, "MINIMAL")
     assert get_thinking_settings("gemini-3.7-flash-high") == (None, "HIGH")

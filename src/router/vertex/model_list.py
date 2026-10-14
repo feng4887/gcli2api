@@ -18,18 +18,17 @@ from fastapi.responses import JSONResponse
 # 本地模块 - 工具和认证
 from src.utils import authenticate_flexible
 
+# 2026-10-14 按后端实测可用集合重建（旧 3.1-pro / 3.5 / 3.6 / 3.7 / argon 已下线）。
 VERTEX_MODELS = [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-image",
     "gemini-3.8-flash",
-    "gemini-4-argon",
 ]
+
 
 # 本地模块 - 基础路由工具
 from src.router.base_router import create_gemini_model_list, create_openai_model_list

@@ -19,19 +19,22 @@ def isolate_configuration(monkeypatch):
     monkeypatch.setenv("COMPATIBILITY_MODE", "false")
 
 
-def test_argon_feature_combinations_and_model_routes():
+def test_argon_is_not_advertised_while_backend_returns_404():
+    """2026-10-14 实测：Antigravity 后端对 gemini-4-argon 返回 404（已下线）。
+
+    因此不再对外广告；映射与请求规范化代码保留，后端恢复后改回广告即可。
+    """
     models = get_available_models()
     assert len(models) == len(set(models))
-    for prefix in ("", "假流式/", "流式抗截断/"):
-        for level in ("", "-low", "-medium", "-high"):
-            for search in ("", "-search"):
-                assert f"{prefix}gemini-4-argon{level}{search}" in models
-        assert f"{prefix}gemini-4-argon-minimal" not in models
+    assert not [m for m in models if "gemini-4-argon" in m]
     for module in (cli_models, vertex_models):
         openai_body = json.loads(asyncio.run(module.list_openai_models("test")).body)
         gemini_body = json.loads(asyncio.run(module.list_gemini_models("test")).body)
-        assert "gemini-4-argon" in {entry["id"] for entry in openai_body["data"]}
-        assert "models/gemini-4-argon" in {entry["name"] for entry in gemini_body["models"]}
+        assert "gemini-4-argon" not in {entry["id"] for entry in openai_body["data"]}
+        assert "models/gemini-4-argon" not in {
+            entry["name"] for entry in gemini_body["models"]
+        }
+
 
 
 @pytest.mark.parametrize("suffix,level", [

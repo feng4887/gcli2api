@@ -23,6 +23,28 @@ from src.utils import (
 
 # 本地模块 - API
 from src.api.antigravity import fetch_available_models
+from src.converter.gemini_fix import set_antigravity_available_model_ids
+
+# 后端仍会广告、但不应出现在对外列表中的 ID：
+# chat_* 对聊天请求返回 400 INVALID_ARGUMENT；
+# 3.5 Flash 全系与 3-flash-agent/preview 返回“Gemini 3.5 Flash is no longer available.”
+# 停用通知；gemini-4-argon-disabled 实测 404（后端侧禁用）；均为 2026-10-14 实测。
+_ANTIGRAVITY_HIDDEN_MODEL_IDS = frozenset({
+    "gemini-4-argon-disabled",
+    "chat_20706",
+    "chat_23310",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash-low",
+    "gemini-3.5-flash-extra-low",
+    "gemini-3-flash-agent",
+    "gemini-3-flash-preview",
+})
+
+# 后端只广告 tiered 档位的模型：为裸名与 high/medium/low 生成别名，
+# 请求时由 gemini_fix 统一收敛到 tiered；后端开放固定档位后自动直连。
+_ANTIGRAVITY_TIERED_FAMILIES = ("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash")
+
 
 # 本地模块 - 基础路由工具
 from src.router.base_router import create_gemini_model_list, create_openai_model_list
@@ -53,10 +75,18 @@ async def get_antigravity_models_with_features():
     
     # 提取模型 ID
     base_model_ids = [model['id'] for model in base_models_data if 'id' in model]
-    
+
+    # 刷新映射层缓存，供请求映射做同族降级
+    set_antigravity_available_model_ids(base_model_ids)
+
+    # 对外列表排除内部/已停用 ID
+    visible_model_ids = [
+        m for m in base_model_ids if m not in _ANTIGRAVITY_HIDDEN_MODEL_IDS
+    ]
+
     # 添加功能前缀
     models = []
-    for base_model in base_model_ids:
+    for base_model in visible_model_ids:
         # 基础模型
         models.append(base_model)
         
@@ -65,9 +95,22 @@ async def get_antigravity_models_with_features():
         
         # 流式抗截断模型 (仅在流式传输时有效，前缀格式)
         models.append(f"流式抗截断/{base_model}")
-    
+
+    # tiered-only 家族：补齐裸名与固定档位别名（映射层收敛到 tiered）
+    for tiered_family in _ANTIGRAVITY_TIERED_FAMILIES:
+        if f"{tiered_family}-tiered" not in base_model_ids:
+            continue
+        for alias in (tiered_family, f"{tiered_family}-high",
+                      f"{tiered_family}-medium", f"{tiered_family}-low"):
+            if alias in models:
+                continue
+            models.append(alias)
+            models.append(f"假流式/{alias}")
+            models.append(f"流式抗截断/{alias}")
+
     log.info(f"[ANTIGRAVITY MODEL LIST] 生成了 {len(models)} 个模型（包含功能前缀）")
     return models
+
 
 
 # ==================== API 路由 ====================
