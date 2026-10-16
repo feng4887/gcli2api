@@ -1,6 +1,6 @@
 # GeminiCLI to API
 
-**Convert GeminiCLI and Antigravity into OpenAI, GEMINI, and Claude API-compatible interfaces, with Gemini 4 Argon model support**
+**Convert GeminiCLI and Antigravity into OpenAI, GEMINI, and Claude API-compatible interfaces, with Gemini 3.8 Claude Opus 4.6,Sonnet 4.6 model support**
 
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
