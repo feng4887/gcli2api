@@ -64,7 +64,10 @@ def test_argon_normalization_preserves_level_and_removes_unsupported_fields(mode
     }
     original = copy.deepcopy(request)
     result = asyncio.run(normalize_gemini_request(request, mode=mode))
-    assert result["model"] == "gemini-4-argon"
+    # Antigravity transport only accepts tiered IDs: bare gemini-4-argon 404s
+    # upstream (verified 2026-11-02). geminicli / vertex keep the bare name.
+    expected_model = "gemini-4-argon-high" if mode == "antigravity" else "gemini-4-argon"
+    assert result["model"] == expected_model
     assert result["generationConfig"] == {
         "thinkingConfig": {"thinkingLevel": "HIGH", "includeThoughts": True},
         "maxOutputTokens": 32768,
