@@ -24,6 +24,19 @@ except ImportError:
     wreq = None
     Emulation = None
     WREQ_AVAILABLE = False
+# VERTEX proxy: wreq direct-connect to Google times out on CN servers; route via PROXY env
+import os as _os
+
+
+def _vertex_proxy():
+    _url = _os.environ.get("PROXY")
+    if not _url or wreq is None:
+        return None
+    try:
+        return wreq.Proxy.https(_url)
+    except Exception:
+        return None
+
 
 
 # ==================== 常量 ====================
@@ -168,7 +181,11 @@ async def _fetch_recaptcha_token_once() -> Optional[str]:
             Emulation.Edge142, Emulation.Edge143, Emulation.Edge144,
             Emulation.Edge145, Emulation.Edge146, Emulation.Edge147,
         ]
-        emulation = random.choice(_EMULATION_POOL)
+        # TLS fingerprint must match sec-ch-ua (Chrome 150), else reCAPTCHA flags bot
+        try:
+            emulation = Emulation.Chrome150
+        except AttributeError:
+            emulation = random.choice(_EMULATION_POOL)
 
         cb = _random_string(10)
         anchor_url = (
@@ -181,7 +198,7 @@ async def _fetch_recaptcha_token_once() -> Optional[str]:
         anchor_resp = await wreq.get(
             anchor_url,
             headers=_anchor_headers(),
-            emulation=emulation,
+            emulation=emulation, proxy=_vertex_proxy(),
         )
         if anchor_resp.status != 200:
             log.warning(f"[VERTEX RECAPTCHA] anchor GET failed: status={anchor_resp.status}")
@@ -219,7 +236,7 @@ async def _fetch_recaptcha_token_once() -> Optional[str]:
             reload_url,
             form=form_data,
             headers=reload_headers,
-            emulation=emulation,
+            emulation=emulation, proxy=_vertex_proxy(),
         )
         if reload_resp.status != 200:
             log.warning(f"[VERTEX RECAPTCHA] reload POST failed: status={reload_resp.status}")
@@ -650,7 +667,7 @@ async def stream_request(
                 BATCH_GRAPHQL_URL,
                 json=payload,
                 headers=headers,
-                emulation=Emulation.Chrome131,
+                emulation=Emulation.Chrome150, proxy=_vertex_proxy(),
             )
         except Exception as e:
             log.error(f"[VERTEX STREAM] wreq post exception: {e}")
@@ -829,7 +846,7 @@ async def non_stream_request(
                 BATCH_GRAPHQL_URL,
                 json=payload,
                 headers=headers,
-                emulation=Emulation.Chrome131,
+                emulation=Emulation.Chrome150, proxy=_vertex_proxy(),
             )
         except Exception as e:
             log.error(f"[VERTEX NON-STREAM] wreq exception: {e}")
